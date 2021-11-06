@@ -1,0 +1,187 @@
+name: openssl+crossbuild+package+release
+on:
+  - workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [openssl]
+        os_id: [debian, ubuntu]
+        os_version_id: [stretch, buster, bullseye, bionic, focal]
+        arch: [amd64, armhf, arm64]
+        include:
+          - arch: amd64
+            CHOST: "x86_64-linux-gnu"
+            docker_arch: amd64
+            docker_platform: linux/amd64
+            cross_openssl: "linux-x86_64"
+          - arch: armhf
+            CHOST: "arm-linux-gnueabihf"
+            docker_arch: arm32v7
+            docker_platform: linux/arm/v7
+            cross_openssl: "linux-armv4"
+          - arch: arm64
+            CHOST: "aarch64-linux-gnu"
+            docker_arch: arm64v8
+            docker_platform: linux/arm64/v8
+            cross_openssl: "linux-aarch64"
+        exclude:
+          - os_id: debian
+            os_version_id: bionic
+          - os_id: debian
+            os_version_id: focal
+          - os_id: ubuntu
+            os_version_id: stretch
+          - os_id: ubuntu
+            os_version_id: buster
+          - os_id: ubuntu
+            os_version_id: bullseye
+
+    name: ${{ matrix.os_id }}:${{ matrix.os_version_id }} ${{ matrix.name }} ${{ matrix.arch }}
+
+    env:
+      opt_dir_name: "opt/local"
+      github_branch: "master"
+      prerelease: false
+
+    steps:
+      - uses: actions/checkout@v2.3.5
+
+      - name: Host - update
+        run: sudo apt-get update
+
+      - name: Host - upgrade
+        run: sudo apt-get -y upgrade
+
+      - name: Host - Install host qemu-static
+        run: sudo apt-get install -y qemu binfmt-support qemu-user-static
+
+      - name: Host - Docker multiarch bootstrap
+        run: sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      - name: Host - Create Docker template env file
+        run: |
+          echo "DEBIAN_FRONTEND=noninteractive" > env.custom
+          echo "LANG=en_US.UTF-8" >> env.custom
+          echo "PATH=/${{ env.opt_dir_name }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >> env.custom
+          echo "LD_LIBRARY_PATH=/${{ env.opt_dir_name }}/lib:/usr/lib/${{ matrix.CHOST }}:/usr/lib:/usr/local/lib" >> env.custom
+          echo "CHOST=${{ matrix.CHOST }}" >> env.custom
+          echo "CC=${{ matrix.CHOST }}-gcc" >> env.custom
+          echo "AR=${{ matrix.CHOST }}-ar" >> env.custom
+          echo "CXX=${{ matrix.CHOST }}-g++" >> env.custom
+
+      - name: Host - Create docker multiarch ${{ matrix.arch }} container
+        run: docker run --name multiarch -it -d --env-file env.custom -w /root -v ${{ github.workspace }}:/root ${{ matrix.os_id }}:${{ matrix.os_version_id }}
+
+      - name: Host - Create docker binary test ${{ matrix.arch }} container
+        run: docker run --name bintest -it -d --env-file env.custom -w /root --platform ${{ matrix.docker_platform }} -v ${{ github.workspace }}:/root ${{ matrix.docker_arch }}/${{ matrix.os_id }}:${{ matrix.os_version_id }}
+
+      - name: Docker target - fix Ubuntu sources
+        if: |
+          matrix.os_id == 'ubuntu' && matrix.arch != 'amd64'
+        run: |
+          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=${{ matrix.arch }}] http://ports.ubuntu.com/ubuntu-ports ${{ matrix.os_version_id }} main restricted universe multiverse" > sources.list'
+          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=${{ matrix.arch }}] http://ports.ubuntu.com/ubuntu-ports ${{ matrix.os_version_id }}-updates main restricted universe multiverse" >> sources.list'
+          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=${{ matrix.arch }}] http://ports.ubuntu.com/ubuntu-ports ${{ matrix.os_version_id }}-security main restricted universe multiverse" >> sources.list'
+          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }} main restricted universe multiverse" >> sources.list'
+          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }}-updates main restricted universe multiverse" >> sources.list'
+          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }}-backports restricted universe multiverse" >> sources.list'
+          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://security.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }}-security main restricted universe multiverse" >> sources.list'
+
+      - name: Docker target - dpkg configure arch
+        run: docker exec --env-file env.custom multiarch dpkg --add-architecture ${{ matrix.arch }}
+
+      - name: Docker target - Run apt-get update
+        run: |
+          docker exec --env-file env.custom multiarch apt-get update
+          docker exec --env-file env.custom bintest apt-get update
+
+      - name: Docker target - Run apt-get upgrade
+        run: |
+          docker exec --env-file env.custom multiarch apt-get upgrade -y
+          docker exec --env-file env.custom bintest apt-get upgrade -y
+
+      - name: Docker target - apt-get install the core build dependencies
+        run: |
+          docker exec --env-file env.custom multiarch apt-get install -y build-essential curl pkg-config automake libtool git perl python3 python3-dev unzip ccache
+          docker exec --env-file env.custom bintest apt-get install -y openssl binutils
+
+      - name: Docker target - apt-get install crossbuild-essential
+        if: matrix.arch != 'amd64'
+        run: docker exec --env-file env.custom multiarch apt-get install -y crossbuild-essential-${{ matrix.arch }}
+
+      - name: Docker target - apt-get install cross target deps
+        run: |
+          docker exec --env-file env.custom multiarch apt-get install -y libstdc++-*-dev:${{ matrix.arch }}
+
+      - name: Docker target - bionic - apt-get install gcc-8-base g++-8
+        if: matrix.arch == 'amd64' && matrix.os_version_id == 'bionic'
+        run: docker exec --env-file env.custom multiarch apt-get install -y gcc-8 g++-8
+
+      - name: Docker target - bionic - apt-get install gcc-8 g++-8 cross
+        if: matrix.arch != 'amd64' && matrix.os_version_id == 'bionic'
+        run: docker exec --env-file env.custom multiarch apt-get install -y cpp-8-${{ matrix.CHOST }} g++-8-${{ matrix.CHOST }} gcc-8-${{ matrix.CHOST }}
+
+      - name: Docker target - bionic - reconfigure build vars
+        if: matrix.os_version_id == 'bionic'
+        run: |
+          echo "CC=${{ matrix.CHOST }}-gcc-8" >> env.custom
+          echo "AR=${{ matrix.CHOST }}-ar-8" >> env.custom
+          echo "CXX=${{ matrix.CHOST }}-g++-8" >> env.custom
+
+      - name: Docker target - zlib-ng download and install
+        run: |
+          docker exec --env-file env.custom multiarch curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_version_id }}-cmake-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_version_id }}-cmake-${{ matrix.arch }}.deb
+          docker exec --env-file env.custom multiarch dpkg -i ${{ matrix.os_id }}-${{ matrix.os_version_id }}-cmake-${{ matrix.arch }}.deb
+
+      - name: Docker target - Git clone openssl
+        run: docker exec --env-file env.custom multiarch git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git openssl
+
+      - name: Docker target - Configure openssl
+        run: docker exec --env-file env.custom -w /root/openssl multiarch ./Configure ${{ matrix.cross_openssl }} --prefix="${{ env.opt_dir_name }}" --libdir="${{ env.opt_dir_name }}/lib" --openssldir="/etc/ssl"
+
+      - name: Docker target - Make build openssl
+        run: docker exec --env-file env.custom -w /root/openssl multiarch make -j$(nproc)
+
+      - name: Docker target - Make install openssl
+        run: docker exec --env-file env.custom -w /root/openssl multiarch make install
+
+      - name: Docker target - Get openssl version version - ${{ matrix.arch }}
+        run: docker exec --env-file env.custom -w /root/openssl multiarch bash -c '$(source VERSION.dat; printf '%s' "$MAJOR.$MINOR.$PATCH" > openssl.version)'
+
+      - name: Host - Set openssl version to variable
+        run: |
+          openssl_version="$(<openssl.version)"
+          echo "openssl_version=${openssl_version}" >> $GITHUB_ENV
+
+      - name: Host - Set deb dependencies for openssl
+        run: echo "openssl-deb-deps=openssl" >> $GITHUB_ENV
+
+      - name: Host - Create deb packages
+        uses: jiro4989/build-deb-action@v2
+        with:
+          package: "${{ matrix.name }}"
+          package_root: build
+          maintainer: userdocs
+          version: "${{ env.openssl_version }}"
+          depends: "${{ env.openssl-deb-deps }}"
+          arch: "${{ matrix.arch }}"
+          desc: "${{ matrix.name }}-${{ matrix.arch }} for ${{ matrix.os_id }}-${{ matrix.os_version_id }}"
+
+      - name: Host - Remove version from release name and use hyphens
+        run: mv -f "${{ matrix.name }}_${{ env.openssl_version }}_${{ matrix.arch }}.deb" "${{ matrix.os_id }}-${{ matrix.os_version_id }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+
+      - name: Host - "Create release - tag - assets"
+        uses: ncipollo/release-action@v1
+        with:
+          prerelease: ${{ env.prerelease }}
+          artifacts: "${{ matrix.os_id }}-${{ matrix.os_version_id }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+          replacesArtifacts: true
+          tag: "${{ env.openssl_version }}"
+          name: "openssl ${{ env.openssl_version }}"
+          body: "openssl built from github master on amd64 arm64 armhf for Debian Stretch Buster Bullseye and Ubuntu bionic Focal"
+          allowUpdates: true
+          token: "${{ secrets.GITHUB_TOKEN }}"
