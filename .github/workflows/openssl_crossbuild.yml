@@ -141,7 +141,7 @@ jobs:
         run: docker exec --env-file env.custom multiarch git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git openssl
 
       - name: Docker target - Configure openssl
-        run: docker exec --env-file env.custom -w /root/openssl multiarch ./Configure ${{ matrix.cross_openssl }} --prefix="${{ env.opt_dir_name }}" --libdir="${{ env.opt_dir_name }}/lib" --openssldir="/etc/ssl"
+        run: docker exec --env-file env.custom -w /root/openssl multiarch ./Configure ${{ matrix.cross_openssl }} --prefix="/root/build/${{ env.opt_dir_name }}" --libdir="${{ env.opt_dir_name }}/lib" --openssldir="/etc/ssl"
 
       - name: Docker target - Make build openssl
         run: docker exec --env-file env.custom -w /root/openssl multiarch make -j$(nproc)
