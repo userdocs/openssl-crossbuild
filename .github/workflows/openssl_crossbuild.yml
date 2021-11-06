@@ -150,7 +150,7 @@ jobs:
         run: docker exec --env-file env.custom -w /root/openssl multiarch make install
 
       - name: Docker target - Get openssl version version - ${{ matrix.arch }}
-        run: docker exec --env-file env.custom -w /root/openssl multiarch bash -c '$(source VERSION.dat; printf '%s' "$MAJOR.$MINOR.$PATCH" > openssl.version)'
+        run: docker exec --env-file env.custom -w /root multiarch bash -c '$(source openssl/VERSION.dat; printf '%s' "$MAJOR.$MINOR.$PATCH" > openssl.version)'
 
       - name: Host - Set openssl version to variable
         run: |
