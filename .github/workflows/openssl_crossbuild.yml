@@ -134,8 +134,8 @@ jobs:
 
       - name: Docker target - zlib-ng download and install
         run: |
-          docker exec --env-file env.custom multiarch curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_version_id }}-cmake-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_version_id }}-cmake-${{ matrix.arch }}.deb
-          docker exec --env-file env.custom multiarch dpkg -i ${{ matrix.os_id }}-${{ matrix.os_version_id }}-cmake-${{ matrix.arch }}.deb
+          docker exec --env-file env.custom multiarch curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_version_id }}-zlib-ng-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_version_id }}-zlib-ng-${{ matrix.arch }}.deb
+          docker exec --env-file env.custom multiarch dpkg -i ${{ matrix.os_id }}-${{ matrix.os_version_id }}-zlib-ng-${{ matrix.arch }}.deb
 
       - name: Docker target - Git clone openssl
         run: docker exec --env-file env.custom multiarch git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git openssl
