@@ -10,7 +10,7 @@ jobs:
       matrix:
         name: [openssl]
         os_id: [debian, ubuntu]
-        os_version_id: [stretch, buster, bullseye, bionic, focal]
+        os_version_id: [stretch, buster, bullseye, bionic, focal, jammy]
         arch: [amd64, armhf, arm64]
         include:
           - arch: amd64
@@ -33,6 +33,8 @@ jobs:
             os_version_id: bionic
           - os_id: debian
             os_version_id: focal
+          - os_id: debian
+            os_version_id: jammy
           - os_id: ubuntu
             os_version_id: stretch
           - os_id: ubuntu
