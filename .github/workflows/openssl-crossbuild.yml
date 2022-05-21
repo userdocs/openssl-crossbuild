@@ -1,6 +1,8 @@
 name: openssl+crossbuild+package+release
 on:
-  - workflow_dispatch
+  workflow_dispatch:
+  schedule:
+    - cron: "0 02 * * *"
 
 jobs:
   build:
