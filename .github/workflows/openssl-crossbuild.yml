@@ -2,7 +2,7 @@ name: openssl+crossbuild+package+release
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 02 * * *"
+    - cron: "30 00 * * *"
 
 jobs:
   build:
@@ -73,6 +73,9 @@ jobs:
         run: |
           echo "DEBIAN_FRONTEND=noninteractive" > env.custom
           echo "LANG=en_US.UTF-8" >> env.custom
+          echo "LANGUAGE=en_US.UTF-8" >> env.custom
+          echo "LC_ALL=en_US.UTF-8" >> env.custom
+          echo "LC_CTYPE=en_US.UTF-8" >> env.custom
           echo "PATH=/${{ env.opt_dir_name }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >> env.custom
           echo "LD_LIBRARY_PATH=/${{ env.opt_dir_name }}/lib:/usr/lib/${{ matrix.CHOST }}:/usr/lib:/usr/local/lib" >> env.custom
           echo "CHOST=${{ matrix.CHOST }}" >> env.custom
@@ -85,6 +88,12 @@ jobs:
 
       - name: Host - Create docker binary test ${{ matrix.arch }} container
         run: docker run --name bintest -it -d --env-file env.custom -w /root --platform ${{ matrix.docker_platform }} -v ${{ github.workspace }}:/root ${{ matrix.docker_arch }}/${{ matrix.os_id }}:${{ matrix.os_version_id }}
+
+      - name: Docker target - Set locale data
+        run: |
+          docker exec --env-file env.custom multiarch /bin/bash -c 'echo LC_ALL=en_US.UTF-8 >> /etc/environment'
+          docker exec --env-file env.custom multiarch /bin/bash -c 'echo en_US.UTF-8 UTF-8 >> /etc/locale.gen'
+          docker exec --env-file env.custom multiarch /bin/bash -c 'echo LANG=en_US.UTF-8 > /etc/locale.conf'
 
       - name: Docker target - fix Ubuntu sources
         if: |
@@ -105,6 +114,12 @@ jobs:
         run: |
           docker exec --env-file env.custom multiarch apt-get update
           docker exec --env-file env.custom bintest apt-get update
+
+      - name: Docker target - fix locales
+        run: |
+          docker exec --env-file env.custom multiarch apt-get install -y locales
+          docker exec --env-file env.custom multiarch locale-gen en_US.UTF-8
+          docker exec --env-file env.custom multiarch dpkg-reconfigure locales
 
       - name: Docker target - Run apt-get upgrade
         run: |
