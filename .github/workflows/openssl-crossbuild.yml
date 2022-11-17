@@ -1,8 +1,6 @@
 name: openssl+crossbuild+package+release
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "30 00 * * *"
 
 jobs:
   build:
@@ -55,7 +53,7 @@ jobs:
       prerelease: false
 
     steps:
-      - uses: actions/checkout@v3.1.0
+      - uses: actions/checkout@v3
 
       - name: Host - update
         run: sudo apt-get update
@@ -190,7 +188,7 @@ jobs:
           docker exec --env-file env.custom -w /root/build/etc/ld.so.conf.d multiarch bash -c "echo '/${{ env.opt_dir_name }}/lib' > openssl.conf"
 
       - name: Host - Create deb packages
-        uses: jiro4989/build-deb-action@v2.7.0
+        uses: jiro4989/build-deb-action@v2
         with:
           package: "${{ matrix.name }}"
           package_root: build
@@ -205,7 +203,7 @@ jobs:
         run: mv -f "${{ matrix.name }}_${{ env.openssl_version }}_${{ matrix.arch }}.deb" "${{ matrix.os_id }}-${{ matrix.os_version_id }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
 
       - name: Host - "Create release - tag - assets"
-        uses: ncipollo/release-action@v1.11.1
+        uses: ncipollo/release-action@v1
         with:
           prerelease: ${{ env.prerelease }}
           artifacts: "${{ matrix.os_id }}-${{ matrix.os_version_id }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
