@@ -55,6 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Host - phased updates # https://github.com/actions/runner-images/issues/7192
+        run: echo 'APT::Get::Always-Include-Phased-Updates "false";' | sudo tee /etc/apt/apt.conf.d/99-phased-updates
+
       - name: Host - update
         run: sudo apt-get update
 
