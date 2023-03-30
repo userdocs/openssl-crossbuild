@@ -46,8 +46,7 @@ jobs:
       prerelease: false
       GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
     outputs:
-      draft_id_1: ${{ steps.draft_id_1.outputs.draft_id_1 }}
-      draft_id_2: ${{ steps.draft_id_2.outputs.draft_id_2 }}
+      draft_id: ${{ steps.draft_id.outputs.draft_id }}
 
     steps:
       - name: Host - Checkout action
@@ -144,15 +143,9 @@ jobs:
           body: "${{ matrix.name }} built from github master on amd64 arm64 armhf for Debian Stretch Buster Bullseye and Ubuntu bionic Focal"
           allowUpdates: true
 
-      - name: process v1
-        id: draft_id_1
-        if: matrix.pretty_name == 'v1'
-        run: echo "draft_id_1=${{ steps.release_id.outputs.id }}" >> $GITHUB_OUTPUT
-
-      - name: process v2
-        id: draft_id_2
-        if: matrix.pretty_name == 'v2'
-        run: echo "draft_id_2=${{ steps.release_id.outputs.id }}" >> $GITHUB_OUTPUT
+      - name: proces
+        id: draft_id
+        run: echo "draft_id=${{ steps.release_id.outputs.id }}" >> $GITHUB_OUTPUT
 
   publish_draft:
     name: Publish Drafts
@@ -163,7 +156,7 @@ jobs:
     steps:
       - name: Update draft to release
         run: |
-          drafts=("${{ needs.build.outputs.draft_id_1 }}" "${{ needs.build.outputs.draft_id_2 }}")
+          drafts=("${{ needs.build.outputs.draft_id }}")
           for d in "${drafts[@]}"; do
               gh api --silent /repos/${{ github.repository }}/releases/${d} -F 'draft=false'
           done
