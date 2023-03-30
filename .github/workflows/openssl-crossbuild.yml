@@ -16,6 +16,13 @@ jobs:
         os_id: [debian, ubuntu]
         os_codename: [stretch, buster, bullseye, bionic, focal, jammy]
         arch: [amd64, armhf, arm64]
+        include:
+          - arch: amd64
+            cross_openssl: "linux-x86_64"
+          - arch: armhf
+            cross_openssl: "linux-armv4"
+          - arch: arm64
+            cross_openssl: "linux-aarch64"
         exclude:
           - os_id: debian
             os_codename: bionic
