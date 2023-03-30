@@ -10,185 +10,100 @@ jobs:
       matrix:
         name: [openssl]
         os_id: [debian, ubuntu]
-        os_version_id: [stretch, buster, bullseye, bionic, focal, jammy]
+        os_codename: [stretch, buster, bullseye, bionic, focal, jammy]
         arch: [amd64, armhf, arm64]
-        include:
-          - arch: amd64
-            CHOST: "x86_64-linux-gnu"
-            docker_arch: amd64
-            docker_platform: linux/amd64
-            cross_openssl: "linux-x86_64"
-          - arch: armhf
-            CHOST: "arm-linux-gnueabihf"
-            docker_arch: arm32v7
-            docker_platform: linux/arm/v7
-            cross_openssl: "linux-armv4"
-          - arch: arm64
-            CHOST: "aarch64-linux-gnu"
-            docker_arch: arm64v8
-            docker_platform: linux/arm64/v8
-            cross_openssl: "linux-aarch64"
         exclude:
           - os_id: debian
-            os_version_id: bionic
+            os_codename: bionic
           - os_id: debian
-            os_version_id: focal
+            os_codename: focal
           - os_id: debian
-            os_version_id: jammy
+            os_codename: jammy
           - os_id: ubuntu
-            os_version_id: stretch
+            os_codename: stretch
           - os_id: ubuntu
-            os_version_id: buster
+            os_codename: buster
           - os_id: ubuntu
-            os_version_id: bullseye
+            os_codename: bullseye
 
-    name: ${{ matrix.arch }} ${{ matrix.os_id }}:${{ matrix.os_version_id }} ${{ matrix.name }}
+    name: ${{ matrix.arch }} ${{ matrix.os_id }}:${{ matrix.os_codename }} ${{ matrix.name }}
 
     env:
       opt_dir_name: "opt/local"
-      include_dir: "/opt/local/include"
-      lib_dir: "/opt/local/lib"
       github_branch: "master"
       cxx_standard: "17"
       prerelease: false
+      GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+    outputs:
+      draft_id_1: ${{ steps.draft_id_1.outputs.draft_id_1 }}
+      draft_id_2: ${{ steps.draft_id_2.outputs.draft_id_2 }}
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Host - Checkout action
+        uses: actions/checkout@v3
 
       - name: Host - phased updates # https://github.com/actions/runner-images/issues/7192
         run: echo 'APT::Get::Always-Include-Phased-Updates "false";' | sudo tee /etc/apt/apt.conf.d/99-phased-updates
 
+      - name: Host - set up lunar repo -t lunar
+        run: |
+          printf '%b\n' 'Package: *\nPin: release n=lunar\nPin-Priority: 50' | sudo tee /etc/apt/preferences
+          printf '%b\n' 'deb http://archive.ubuntu.com/ubuntu/ lunar main universe restricted' | sudo tee /etc/apt/sources.list.d/lunar.list
+
       - name: Host - update
         run: sudo apt-get update
 
-      - name: Host - upgrade
-        run: sudo apt-get -y upgrade
+      # - name: Host - upgrade
+      #   run: sudo apt-get -y upgrade
 
-      - name: Host - Install host qemu-static
-        run: sudo apt-get install -y qemu binfmt-support qemu-user-static
+      - name: Host - set up qemu-user-static binfmt-support from lunar
+        run: sudo apt install -t lunar libpipeline1 qemu-user-static binfmt-support
 
-      - name: Host - Docker multiarch bootstrap
-        run: sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-      - name: Host - Create Docker template env file
-        run: |
-          echo "DEBIAN_FRONTEND=noninteractive" > env.custom
-          echo "LANG=en_US.UTF-8" >> env.custom
-          echo "LANGUAGE=en_US.UTF-8" >> env.custom
-          echo "LC_ALL=en_US.UTF-8" >> env.custom
-          echo "LC_CTYPE=en_US.UTF-8" >> env.custom
-          echo "PATH=/${{ env.opt_dir_name }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" >> env.custom
-          echo "LD_LIBRARY_PATH=/${{ env.opt_dir_name }}/lib:/usr/lib/${{ matrix.CHOST }}:/usr/lib:/usr/local/lib" >> env.custom
-          echo "CHOST=${{ matrix.CHOST }}" >> env.custom
-          echo "CC=${{ matrix.CHOST }}-gcc" >> env.custom
-          echo "AR=${{ matrix.CHOST }}-ar" >> env.custom
-          echo "CXX=${{ matrix.CHOST }}-g++" >> env.custom
+      ### Why are we doing it like this and not using a container setup? That's how you're supposed to do it right?
+      ### qemu-user-static and binfmt-support are not part of the runner imager https://github.com/actions/runner-images/blob/main/images/linux/Ubuntu2204-Readme.md
+      ### We would need to modify the runner to install these before the container starts. Which you cannot do as there is no way to bootstrap the host.
+      ### So we install them on the host then create/pull a custom docker image that we use to build teh multiarch targets.
+      ### We are always on the host runner but can use any docker image we need with the access the qemu emulation required.
+      ###
+      ### We are using these pre configured toolchain images that allows me to remove 50% of the code/time from this action.
+      ###
+      ### https://github.com/userdocs/dcb/blob/main/Dockerfile
 
       - name: Host - Create docker multiarch ${{ matrix.arch }} container
-        run: docker run --name multiarch -it -d --env-file env.custom -w /root -v ${{ github.workspace }}:/root ${{ matrix.os_id }}:${{ matrix.os_version_id }}
+        run: docker run --name multiarch -it -d -u 1001 -v ${{ github.workspace }}:/home/github ghcr.io/userdocs/dcb:${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
 
-      - name: Host - Create docker binary test ${{ matrix.arch }} container
-        run: docker run --name bintest -it -d --env-file env.custom -w /root --platform ${{ matrix.docker_platform }} -v ${{ github.workspace }}:/root ${{ matrix.docker_arch }}/${{ matrix.os_id }}:${{ matrix.os_version_id }}
+      ###############################################
 
-      - name: Docker target - Set locale data
+      - name: Docker - zlib-ng download and install
         run: |
-          docker exec --env-file env.custom multiarch /bin/bash -c 'echo LC_ALL=en_US.UTF-8 >> /etc/environment'
-          docker exec --env-file env.custom multiarch /bin/bash -c 'echo en_US.UTF-8 UTF-8 >> /etc/locale.gen'
-          docker exec --env-file env.custom multiarch /bin/bash -c 'echo LANG=en_US.UTF-8 > /etc/locale.conf'
+          docker exec multiarch curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
+          docker exec multiarch sudo dpkg -i ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
 
-      - name: Docker target - fix Ubuntu sources
-        if: |
-          matrix.os_id == 'ubuntu' && matrix.arch != 'amd64'
-        run: |
-          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=${{ matrix.arch }}] http://ports.ubuntu.com/ubuntu-ports ${{ matrix.os_version_id }} main restricted universe multiverse" > sources.list'
-          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=${{ matrix.arch }}] http://ports.ubuntu.com/ubuntu-ports ${{ matrix.os_version_id }}-updates main restricted universe multiverse" >> sources.list'
-          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=${{ matrix.arch }}] http://ports.ubuntu.com/ubuntu-ports ${{ matrix.os_version_id }}-security main restricted universe multiverse" >> sources.list'
-          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }} main restricted universe multiverse" >> sources.list'
-          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }}-updates main restricted universe multiverse" >> sources.list'
-          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }}-backports restricted universe multiverse" >> sources.list'
-          docker exec --env-file env.custom -w /etc/apt/ multiarch  bash -c 'echo "deb [arch=amd64] http://security.ubuntu.com/ubuntu/ ${{ matrix.os_version_id }}-security main restricted universe multiverse" >> sources.list'
-
-      - name: Docker target - dpkg configure arch
-        run: docker exec --env-file env.custom multiarch dpkg --add-architecture ${{ matrix.arch }}
-
-      - name: Docker target - Run apt-get update
-        run: |
-          docker exec --env-file env.custom multiarch apt-get update
-          docker exec --env-file env.custom bintest apt-get update
-
-      - name: Docker target - fix locales
-        run: |
-          docker exec --env-file env.custom multiarch apt-get install -y locales
-          docker exec --env-file env.custom multiarch locale-gen en_US.UTF-8
-          docker exec --env-file env.custom multiarch dpkg-reconfigure locales
-
-      - name: Docker target - Run apt-get upgrade
-        run: |
-          docker exec --env-file env.custom multiarch apt-get upgrade -y
-          docker exec --env-file env.custom bintest apt-get upgrade -y
-
-      - name: Docker target - apt-get install the core build dependencies
-        run: |
-          docker exec --env-file env.custom multiarch apt-get install -y build-essential curl pkg-config automake libtool git perl python3 python3-dev unzip ccache
-          docker exec --env-file env.custom bintest apt-get install -y openssl binutils
-
-      - name: Docker target - apt-get install crossbuild-essential
-        if: matrix.arch != 'amd64'
-        run: docker exec --env-file env.custom multiarch apt-get install -y crossbuild-essential-${{ matrix.arch }}
-
-      - name: Docker target - apt-get install cross target deps
-        run: docker exec --env-file env.custom multiarch apt-get install -y openssl:${{ matrix.arch }} re2c:${{ matrix.arch }} libstdc++-*-dev:${{ matrix.arch }}
-
-      - name: Docker target - bionic - apt-get install gcc-8-base g++-8
-        if: matrix.arch == 'amd64' && matrix.os_version_id == 'bionic'
-        run: docker exec --env-file env.custom multiarch apt-get install -y gcc-8 g++-8
-
-      - name: Docker target - bionic - apt-get install gcc-8 g++-8 cross
-        if: matrix.arch != 'amd64' && matrix.os_version_id == 'bionic'
-        run: docker exec --env-file env.custom multiarch apt-get install -y cpp-8-${{ matrix.CHOST }} g++-8-${{ matrix.CHOST }} gcc-8-${{ matrix.CHOST }}
-
-      - name: Docker target - bionic - reconfigure build vars
-        if: matrix.os_version_id == 'bionic'
-        run: |
-          echo "CC=${{ matrix.CHOST }}-gcc-8" >> env.custom
-          echo "AR=${{ matrix.CHOST }}-gcc-ar-8" >> env.custom
-          echo "CXX=${{ matrix.CHOST }}-g++-8" >> env.custom
-
-      - name: Docker target - zlib-ng download and install
-        run: |
-          docker exec --env-file env.custom multiarch curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_version_id }}-zlib-ng-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_version_id }}-zlib-ng-${{ matrix.arch }}.deb
-          docker exec --env-file env.custom multiarch dpkg -i ${{ matrix.os_id }}-${{ matrix.os_version_id }}-zlib-ng-${{ matrix.arch }}.deb
-
-      - name: Docker target - Git clone openssl
-        run: docker exec --env-file env.custom multiarch git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git openssl
+      - name: Host - target - Git clone openssl
+        run: git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git openssl
 
       - name: Host - Set openssl version to variable
         run: echo "openssl_version=$(source openssl/VERSION.dat; printf '%s' "$MAJOR.$MINOR.$PATCH")" >> $GITHUB_ENV
 
-      - name: Docker target - set extra build vars
-        run: |
-          echo "CPPFLAGS=-I${{ env.include_dir }}" >> env.custom
-          echo "LDFLAGS=-L${{ env.lib_dir }}" >> env.custom
-
       - name: Docker target - Configure openssl
-        run: docker exec --env-file env.custom -w /root/openssl multiarch ./Configure ${{ matrix.cross_openssl }} --prefix="/root/build/${{ env.opt_dir_name }}" --libdir=lib --openssldir=/etc/ssl zlib
+        run: docker exec -w /home/github/openssl multiarch ./Configure ${{ matrix.cross_openssl }} --prefix="/home/github/build/${{ env.opt_dir_name }}" --libdir=lib --openssldir=/etc/ssl zlib
 
       - name: Docker target - dump preferences for openssl
-        run: docker exec --env-file env.custom -w /root/openssl multiarch perl configdata.pm --dump
+        run: docker exec -w /home/github/openssl multiarch perl configdata.pm --dump
 
       - name: Docker target - Make build openssl
-        run: docker exec --env-file env.custom -w /root/openssl multiarch make -j$(nproc)
+        run: docker exec -w /home/github/openssl multiarch make -j $(nproc)
 
       - name: Docker target - Make install_sw openssl
-        run: docker exec --env-file env.custom -w /root/openssl multiarch make install_sw
+        run: docker exec -w /home/github/openssl multiarch make install_sw
 
       - name: Host - Set deb dependencies for openssl
         run: echo "openssl-deb-deps=zlib-ng" >> $GITHUB_ENV
 
       - name: Docker target - ldconfig - create /etc/ld.so.conf.d/openssl.conf
         run: |
-          docker exec --env-file env.custom -w /root/build multiarch mkdir -p etc/ld.so.conf.d
-          docker exec --env-file env.custom -w /root/build/etc/ld.so.conf.d multiarch bash -c "echo '/${{ env.opt_dir_name }}/lib' > openssl.conf"
+          docker exec -w /home/github/build multiarch mkdir -p etc/ld.so.conf.d
+          docker exec -w /home/github/build/etc/ld.so.conf.d multiarch bash -c "echo '/${{ env.opt_dir_name }}/lib' > openssl.conf"
 
       - name: Host - Create deb packages
         uses: jiro4989/build-deb-action@v2
@@ -200,19 +115,43 @@ jobs:
           version: "${{ env.openssl_version }}"
           depends: "${{ env.openssl-deb-deps }}"
           arch: "${{ matrix.arch }}"
-          desc: "${{ matrix.name }}-${{ matrix.arch }} for ${{ matrix.os_id }}-${{ matrix.os_version_id }}"
+          desc: "${{ matrix.name }}-${{ matrix.arch }} for ${{ matrix.os_id }}-${{ matrix.os_codename }}"
 
       - name: Host - Remove version from release name and use hyphens
-        run: mv -f "${{ matrix.name }}_${{ env.openssl_version }}_${{ matrix.arch }}.deb" "${{ matrix.os_id }}-${{ matrix.os_version_id }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+        run: mv -f "${{ matrix.name }}_${{ env.openssl_version }}_${{ matrix.arch }}.deb" "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
 
       - name: Host - "Create release - tag - assets"
         uses: ncipollo/release-action@v1
         with:
           prerelease: ${{ env.prerelease }}
-          artifacts: "${{ matrix.os_id }}-${{ matrix.os_version_id }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+          artifacts: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
           replacesArtifacts: true
           tag: "${{ env.openssl_version }}"
           name: "openssl ${{ env.openssl_version }}"
           body: "openssl built from github master on amd64 arm64 armhf for Debian Stretch Buster Bullseye and Ubuntu bionic Focal"
           allowUpdates: true
           token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: process v1
+        id: draft_id_1
+        if: matrix.pretty_name == 'v1'
+        run: echo "draft_id_1=${{ steps.release_id.outputs.id }}" >> $GITHUB_OUTPUT
+
+      - name: process v2
+        id: draft_id_2
+        if: matrix.pretty_name == 'v2'
+        run: echo "draft_id_2=${{ steps.release_id.outputs.id }}" >> $GITHUB_OUTPUT
+
+  publish_draft:
+    name: Publish Drafts
+    runs-on: ubuntu-latest
+    needs: [build]
+    env:
+      GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+    steps:
+      - name: Update draft to release
+        run: |
+          drafts=("${{ needs.build.outputs.draft_id_1 }}" "${{ needs.build.outputs.draft_id_2 }}")
+          for d in "${drafts[@]}"; do
+              gh api --silent /repos/${{ github.repository }}/releases/${d} -F 'draft=false'
+          done
