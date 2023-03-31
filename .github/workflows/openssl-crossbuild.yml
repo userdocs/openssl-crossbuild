@@ -6,9 +6,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      openssl_version: ${{ steps.version_info.outputs.openssl_version }}
     strategy:
       fail-fast: false
       matrix:
@@ -37,24 +42,23 @@ jobs:
           - os_id: ubuntu
             os_codename: bullseye
 
-    name: ${{ matrix.arch }} ${{ matrix.os_id }}:${{ matrix.os_codename }} ${{ matrix.name }}
+    name: ${{ matrix.os_id }}:${{ matrix.os_codename }} ${{ matrix.name }} ${{ matrix.arch }}
 
     env:
       opt_dir_name: "opt/local"
       github_branch: "master"
       cxx_standard: "17"
-      prerelease: false
       GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-    outputs:
-      draft_id: ${{ steps.draft_id.outputs.draft_id }}
 
     steps:
       - name: Host - Checkout action
         uses: actions/checkout@v3
 
-      - name: Host - phased updates # https://github.com/actions/runner-images/issues/7192
+      # Fix this bug https://github.com/actions/runner-images/issues/7192
+      - name: Host - phased updates
         run: echo 'APT::Get::Always-Include-Phased-Updates "false";' | sudo tee /etc/apt/apt.conf.d/99-phased-updates
 
+      # Bootstrap Ubuntu Lunar repo so that we can install specific app we may need, like binfmt and qemu-user-static
       - name: Host - set up lunar repo -t lunar
         run: |
           printf '%b\n' 'Package: *\nPin: release n=lunar\nPin-Priority: 50' | sudo tee /etc/apt/preferences
@@ -66,23 +70,25 @@ jobs:
       # - name: Host - upgrade
       #   run: sudo apt-get -y upgrade
 
+      # No action or other method to bootstrap binfmt. Install from lunar and we get the latest versions and full docker support
       - name: Host - set up qemu-user-static binfmt-support from lunar
         run: sudo apt install -t lunar libpipeline1 qemu-user-static binfmt-support
 
-      ### Why are we doing it like this and not using a container setup? That's how you're supposed to do it right?
-      ### qemu-user-static and binfmt-support are not part of the runner imager https://github.com/actions/runner-images/blob/main/images/linux/Ubuntu2204-Readme.md
-      ### We would need to modify the runner to install these before the container starts. Which you cannot do as there is no way to bootstrap the host.
-      ### So we install them on the host then create/pull a custom docker image that we use to build teh multiarch targets.
-      ### We are always on the host runner but can use any docker image we need with the access the qemu emulation required.
-      ###
-      ### We are using these pre configured toolchain images that allows me to remove 50% of the code/time from this action.
-      ###
-      ### https://github.com/userdocs/dcb/blob/main/Dockerfile
+      # Why are we doing it like this and not using a container setup? That's how you're supposed to do it, right?
+      # qemu-user-static and binfmt-support are not part of the runner images https://github.com/actions/runner-images/blob/main/images/linux/Ubuntu2204-Readme.md
+      # We would need to modify the runner to install these before the container starts. Which you cannot do as there is no way to bootstrap the host.
+      # So we install them on the host then create/pull a custom docker image that we use to build the multiarch targets.
+      # We are always on the host runner but can use any docker image we need with the access the qemu emulation when required.
+      #
+      # We are using these pre configured toolchain images that allows me to remove 50% of the code/time from this action.
+      #
+      # https://github.com/userdocs/dcb/blob/main/Dockerfile
+      #
+      # The image does not run as root and has password-less sudo. There are two users username:1000 /home/username and github:1001 /home/github
+      # In the action it runs as 1001 /home/github and files should be available to the host. For local use, you might need -u 1000
 
       - name: Host - Create docker multiarch ${{ matrix.arch }} container
         run: docker run --name multiarch -it -d -u 1001 -v ${{ github.workspace }}:/home/github ghcr.io/userdocs/dcb:${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
-
-      ###############################################
 
       - name: Docker - zlib-ng download and install
         run: |
@@ -130,33 +136,64 @@ jobs:
       - name: Host - Remove version from release name and use hyphens
         run: mv -f "${{ matrix.name }}_${{ env.openssl_version }}_${{ matrix.arch }}.deb" "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
 
+      - name: Info
+        id: version_info
+        run: |          
+          echo "openssl_version=${{ env.openssl_version }}" >> $GITHUB_OUTPUT
+
+      - name: Host - upload deb packages
+        uses: actions/upload-artifact@v3
+        with:
+          name: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}-deb"
+          path: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+
+  release:
+    name: Upload artifacts to release
+    runs-on: ubuntu-latest
+    needs: build
+    if: always() && contains(needs.*.result, 'success') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    env:
+      GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      openssl_version: ${{ needs.build.outputs.openssl_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Host - Download artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Host - artifacts organise for release
+        run: |
+          mkdir -p "releases"
+          for files in *-deb; do
+              cp -rf ${files}/* "releases/"
+          done
+
       - name: Host - "Create release - tag - assets"
         id: release_id
         uses: ncipollo/release-action@v1
         with:
-          prerelease: ${{ env.prerelease }}
-          draft: "true"
-          artifacts: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+          prerelease: false
+          artifacts: releases/*.deb
           replacesArtifacts: true
-          tag: "${{ env.openssl_version }}"
-          name: "${{ matrix.name }} ${{ env.openssl_version }}"
-          body: "${{ matrix.name }} built from github master on amd64 arm64 armhf for Debian Stretch Buster Bullseye and Ubuntu bionic Focal"
+          tag: "${{ env.openssl_version}"
+          name: "openssl ${{ env.openssl_version}}
+          body: "openssl built from github latest release on amd64 arm64 armhf for Debian Stretch Buster Bullseye and Ubuntu Bionic Focal Jammy"
           allowUpdates: true
 
-      - name: proces
-        id: draft_id
-        run: echo "draft_id=${{ steps.release_id.outputs.id }}" >> $GITHUB_OUTPUT
-
-  publish_draft:
-    name: Publish Drafts
+  rerun:
+    name: rerun
+    needs: build
+    permissions: 
+      actions: write
     runs-on: ubuntu-latest
-    needs: [build]
+    if: ${{ failure() }}
     env:
       GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
     steps:
-      - name: Update draft to release
-        run: |
-          drafts=("${{ needs.build.outputs.draft_id }}")
-          for d in "${drafts[@]}"; do
-              gh api --silent /repos/${{ github.repository }}/releases/${d} -F 'draft=false'
-          done
+      - name: trigger workflow - rerun
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: "rerun.yml"
+          repo: "userdocs/openssl-crossbuild"
+          inputs: '{ "run_id": "${{ github.run_id }}", "attempts": "${{ github.run_attempt }}" }'

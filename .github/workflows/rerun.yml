@@ -1,0 +1,27 @@
+name: rerun
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        required: true
+      attempts:
+        required: true
+jobs:
+  rerun:
+    name: rerun failed jobs
+    permissions: 
+      actions: write
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+    steps:
+      - name: Host - Checkout action
+        uses: actions/checkout@v3
+
+      - name: gh cli test
+        if: inputs.attempts < 5
+        run: |
+          echo "Attempt: ${{ inputs.attempts }}"
+          gh run view ${{ inputs.run_id }} --log-failed
+          gh run rerun ${{ inputs.run_id }} --failed
