@@ -176,14 +176,14 @@ jobs:
           prerelease: false
           artifacts: releases/*.deb
           replacesArtifacts: true
-          tag: "${{ env.openssl_version}"
-          name: "openssl ${{ env.openssl_version}}
+          tag: "${{ env.openssl_version }}"
+          name: "openssl ${{ env.openssl_version }}"
           body: "openssl built from github latest release on amd64 arm64 armhf for Debian Stretch Buster Bullseye and Ubuntu Bionic Focal Jammy"
           allowUpdates: true
 
   rerun:
     name: rerun
-    needs: build
+    needs: release
     permissions: 
       actions: write
     runs-on: ubuntu-latest
