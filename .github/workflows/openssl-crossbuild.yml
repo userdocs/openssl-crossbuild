@@ -170,7 +170,6 @@ jobs:
           done
 
       - name: Host - "Create release - tag - assets"
-        id: release_id
         uses: ncipollo/release-action@v1
         with:
           prerelease: false
