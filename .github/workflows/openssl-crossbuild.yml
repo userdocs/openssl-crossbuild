@@ -1,6 +1,12 @@
 name: openssl crossbuild package release
+
 on:
   workflow_dispatch:
+    inputs:
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -138,7 +144,7 @@ jobs:
 
       - name: Info
         id: version_info
-        run: |          
+        run: |
           echo "openssl_version=${{ env.openssl_version }}" >> $GITHUB_OUTPUT
 
       - name: Host - upload deb packages
@@ -181,7 +187,7 @@ jobs:
           allowUpdates: true
 
   rerun-on-failure:
-    if: ${{ failure() }}
+    if: failure() && inputs.skip_rerun == '0'
     name: rerun-on-failure
     needs: release
     permissions:
