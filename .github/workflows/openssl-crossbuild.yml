@@ -68,19 +68,19 @@ jobs:
 
       # Fix this bug https://github.com/actions/runner-images/issues/7192
       - name: Host - phased updates
-        run: echo 'APT::Get::Always-Include-Phased-Updates "false";' | sudo tee /etc/apt/apt.conf.d/99-phased-updates
+        run: printf '%s\n' 'APT::Get::Always-Include-Phased-Updates "false";' | sudo tee /etc/apt/apt.conf.d/99-phased-updates
 
       # Bootstrap Ubuntu Lunar repo so that we can install specific app we may need, like binfmt and qemu-user-static
       - name: Host - set up lunar repo -t lunar
         run: |
           printf '%b\n' 'Package: *\nPin: release n=lunar\nPin-Priority: 50' | sudo tee /etc/apt/preferences
-          printf '%b\n' 'deb http://archive.ubuntu.com/ubuntu/ lunar main universe restricted' | sudo tee /etc/apt/sources.list.d/lunar.list
+          printf '%s\n' 'deb http://archive.ubuntu.com/ubuntu/ lunar main universe restricted' | sudo tee /etc/apt/sources.list.d/lunar.list
 
       - name: Host - update
         run: sudo apt-get update
 
-      # - name: Host - upgrade
-      #   run: sudo apt-get -y upgrade
+      - name: Host - upgrade
+        run: sudo apt-get -y upgrade
 
       # No action or other method to bootstrap binfmt. Install from lunar and we get the latest versions and full docker support
       - name: Host - set up qemu-user-static binfmt-support from lunar
@@ -111,7 +111,7 @@ jobs:
         run: git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git ${{ matrix.name }}
 
       - name: Host - Set ${{ matrix.name }} version to variable
-        run: echo "openssl_version=$(source openssl/VERSION.dat; printf '%s' "$MAJOR.$MINOR.$PATCH")" >> $GITHUB_ENV
+        run: printf '%s\n' "openssl_version=$(source openssl/VERSION.dat; printf '%s' "$MAJOR.$MINOR.$PATCH")" >> $GITHUB_ENV
 
       - name: Docker - ${{ matrix.name }} configure
         run: docker exec -w /home/github/openssl multiarch ./Configure ${{ matrix.cross_openssl }} --prefix="/home/github/build/${{ env.opt_dir_name }}" --libdir=lib --openssldir=/etc/ssl zlib
@@ -126,12 +126,12 @@ jobs:
         run: docker exec -w /home/github/openssl multiarch make install_sw
 
       - name: Host - Set deb dependencies for openssl
-        run: echo "openssl-deb-deps=zlib-ng" >> $GITHUB_ENV
+        run: printf '%s\n' "openssl-deb-deps=zlib-ng" >> $GITHUB_ENV
 
       - name: Docker - ldconfig - create /etc/ld.so.conf.d/openssl.conf
         run: |
           docker exec -w /home/github/build multiarch mkdir -p etc/ld.so.conf.d
-          docker exec -w /home/github/build/etc/ld.so.conf.d multiarch bash -c "echo '/${{ env.opt_dir_name }}/lib' > openssl.conf"
+          docker exec -w /home/github/build/etc/ld.so.conf.d multiarch bash -c "printf '%s\n' '/${{ env.opt_dir_name }}/lib' > openssl.conf"
 
       - name: Host - Create deb packages
         uses: jiro4989/build-deb-action@v2
@@ -151,7 +151,7 @@ jobs:
       - name: Info
         id: version_info
         run: |
-          echo "openssl_version=${{ env.openssl_version }}" >> $GITHUB_OUTPUT
+          printf '%s\n' "openssl_version=${{ env.openssl_version }}" >> $GITHUB_OUTPUT
 
       - name: Host - upload deb packages
         uses: actions/upload-artifact@v3
