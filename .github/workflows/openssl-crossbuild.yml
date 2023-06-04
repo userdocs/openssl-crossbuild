@@ -138,7 +138,7 @@ jobs:
           docker exec -w /home/github/build/etc/ld.so.conf.d multiarch bash -c "printf '%s\n' '/${{ env.opt_dir_name }}/lib' > openssl.conf"
 
       - name: Host - Create deb packages
-        uses: jiro4989/build-deb-action@v2
+        uses: jiro4989/build-deb-action@v3
         with:
           package: "${{ matrix.name }}"
           package_root: build
