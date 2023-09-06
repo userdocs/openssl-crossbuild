@@ -64,7 +64,7 @@ jobs:
 
     steps:
       - name: Host - Checkout action
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Fix this bug https://github.com/actions/runner-images/issues/7192
       - name: Host - phased updates
@@ -168,7 +168,7 @@ jobs:
       openssl_version: ${{ needs.build.outputs.openssl_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Host - Download artifacts
         uses: actions/download-artifact@v3
@@ -201,7 +201,7 @@ jobs:
     env:
       GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Trigger rerun workflow on job failures
         run: |
           inputs_value="${{ inputs.retries }}"
