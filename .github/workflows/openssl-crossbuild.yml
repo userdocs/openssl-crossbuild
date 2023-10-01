@@ -8,11 +8,11 @@ on:
         required: true
         type: boolean
       retries:
-        description: 'Number of rerun retries'
+        description: "Number of rerun retries"
         required: true
-        default: '5'
+        default: "5"
         type: choice
-        options: [ "1", "2", "3", "4", "5", "6", "7", "8", "9" ]
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +31,7 @@ jobs:
       matrix:
         name: [openssl]
         os_id: [debian, ubuntu]
-        os_codename: [buster, bullseye, bookworm, bionic, focal, jammy]
+        os_codename: [bullseye, bookworm, focal, jammy, mantic]
         arch: [amd64, armhf, arm64]
         include:
           - arch: amd64
@@ -42,13 +42,11 @@ jobs:
             cross_openssl: "linux-aarch64"
         exclude:
           - os_id: debian
-            os_codename: bionic
-          - os_id: debian
             os_codename: focal
           - os_id: debian
             os_codename: jammy
-          - os_id: ubuntu
-            os_codename: buster
+          - os_id: debian
+            os_codename: mantic
           - os_id: ubuntu
             os_codename: bullseye
           - os_id: ubuntu
@@ -188,7 +186,7 @@ jobs:
           replacesArtifacts: true
           tag: "${{ env.openssl_version }}"
           name: "openssl ${{ env.openssl_version }}"
-          body: "openssl built from github latest release on amd64 arm64 armhf for Debian Stretch Buster Bullseye and Ubuntu Bionic Focal Jammy"
+          body: "openssl built from github latest release on amd64 arm64 armhf for Debian Bullseye Bookworm and Ubuntu Focal Jammy Mantic"
           allowUpdates: true
 
   rerun-on-failure:
@@ -206,4 +204,3 @@ jobs:
         run: |
           inputs_value="${{ inputs.retries }}"
           gh workflow run rerun.yml -f run_id=${{ github.run_id }} -f attempts=${{ github.run_attempt }} -f retries=${inputs_value:-3}
-
