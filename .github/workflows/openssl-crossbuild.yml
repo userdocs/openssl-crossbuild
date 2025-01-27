@@ -101,9 +101,6 @@ jobs:
       - name: Docker - Make install_sw openssl
         run: docker exec -u github:github -w /home/github/openssl multiarch make install_sw
 
-      - name: Host - Set deb dependencies for openssl
-        run: printf '%s\n' "openssl-deb-deps=zlib-ng" >> $GITHUB_ENV
-
       - name: Docker - ldconfig - create /etc/ld.so.conf.d/openssl.conf
         run: |
           docker exec -u github:github -w /home/github/build multiarch mkdir -p etc/ld.so.conf.d
@@ -117,7 +114,7 @@ jobs:
           maintainer: userdocs
           compress_type: gzip
           version: "${{ env.openssl_version }}"
-          depends: "${{ env.openssl-deb-deps }}"
+          depends: "zlib-ng"
           arch: "${{ matrix.arch }}"
           desc: "${{ matrix.name }}-${{ env.openssl_version }}-${{ matrix.arch }} for ${{ matrix.os_id }}-${{ matrix.os_codename }}"
 
