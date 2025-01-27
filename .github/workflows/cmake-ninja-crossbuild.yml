@@ -1,0 +1,211 @@
+name: cmake ninja crossbuild package release
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_rerun:
+        description: "Skip rerun?"
+        required: true
+        default: false
+        type: boolean
+      retries:
+        description: "Number of rerun retries"
+        required: true
+        default: "1"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      cmake_version: ${{ steps.version_info.outputs.cmake_version }}
+      ninja_version: ${{ steps.version_info.outputs.ninja_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [cmake]
+        os_id: [debian, ubuntu]
+        os_codename: [bullseye, bookworm, focal, jammy, noble]
+        arch: [amd64, armhf, arm64]
+        exclude:
+          - os_id: debian
+            os_codename: focal
+          - os_id: debian
+            os_codename: jammy
+          - os_id: debian
+            os_codename: noble
+          - os_id: ubuntu
+            os_codename: bullseye
+          - os_id: ubuntu
+            os_codename: bookworm
+
+    name: ${{ matrix.os_id }}:${{ matrix.os_codename }} ${{ matrix.name }} ${{ matrix.arch }}
+
+    env:
+      opt_dir_name: "opt/local"
+      cxx_standard: "17"
+      GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+    steps:
+      - name: Host - Checkout action
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Host - set up qemu-user-static binfmt-support
+        run: sudo apt install libpipeline1 qemu-user-static binfmt-support
+
+      - name: Host - Create docker multiarch ${{ matrix.arch }} container
+        run: docker run --name multiarch -it -d -v ${{ github.workspace }}:/home/github ghcr.io/userdocs/dcb:${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
+
+      - name: Host - cmake set cmake_github_tag
+        run: printf '%s\n' "cmake_github_tag=$(git ls-remote -q -t --refs https://github.com/Kitware/CMake.git | awk '{sub("refs/tags/", "");sub("(.*)-rc(.*)", ""); print $2 }' | awk '!/^$/' | sort -rV | head -n 1)" >> $GITHUB_ENV
+
+      - name: Host - ninja set ninja_github_tag
+        run: printf '%s\n' "ninja_github_tag=$(git ls-remote -q -t --refs https://github.com/ninja-build/ninja.git | awk '/v/{sub("refs/tags/", ""); print $2 }' | awk '!/^$/' | sort -rV | head -n 1)" >> $GITHUB_ENV
+
+      - name: Host - Git clone cmake
+        run: git clone --single-branch --branch ${{ env.cmake_github_tag }} --shallow-submodules --recurse-submodules --depth 1 https://github.com/Kitware/CMake.git cmake
+
+      - name: Docker - Configure cmake
+        run: docker exec -u github:github -w /home/github/cmake multiarch ./configure --parallel=$(nproc) --no-system-libs --enable-ccache --prefix=/home/github/build/${{ env.opt_dir_name}}
+
+      - name: Docker - Make build cmake
+        run: docker exec -u github:github -w /home/github/cmake multiarch make -j $(nproc)
+
+      - name: Docker - Make install cmake
+        run: docker exec -u github:github -w /home/github/cmake multiarch make install
+
+      - name: Host - Git clone ninja
+        run: git clone --single-branch --branch ${{ env.ninja_github_tag }} --shallow-submodules --recurse-submodules --depth 1 https://github.com/ninja-build/ninja.git ninja
+
+      - name: Docker - Configure ninja
+        run: >
+          docker exec -u github:github -w /home/github/ninja multiarch /home/github/build/${{ env.opt_dir_name }}/bin/cmake -B build
+          -D CMAKE_BUILD_TYPE="release"
+          -D CMAKE_CXX_STANDARD="${{ env.cxx_standard }}"
+          -D CMAKE_INSTALL_PREFIX="/home/github/build/${{ env.opt_dir_name }}"
+
+      - name: Docker - Build ninja
+        run: docker exec -u github:github -w /home/github/ninja multiarch /home/github/build/${{ env.opt_dir_name }}/bin/cmake --build build -j"$(nproc)"
+
+      - name: Docker - Install ninja
+        run: docker exec -u github:github -w /home/github/ninja multiarch /home/github/build/${{ env.opt_dir_name }}/bin/cmake --install build
+
+      - name: Docker - Test cmake and ninja binaries and set versions
+        run: |
+          docker exec -u github:github -w /home/github multiarch bash -c '/home/github/build/${{ env.opt_dir_name }}/bin/cmake --version 2> /dev/null | awk "NR==1{print \$3}" > cmake.version'
+          docker exec -u github:github -w /home/github multiarch bash -c '/home/github/build/${{ env.opt_dir_name }}/bin/ninja --version 2> /dev/null > ninja.version'
+
+      - name: Host - Set cmake and ninja versions to variable
+        id: version_info
+        run: |
+          cmake_version="$(<cmake.version)" cmake_version="${cmake_version%%-*}"
+          printf '%s\n' "cmake_version=${cmake_version}" >> $GITHUB_ENV
+
+          ninja_version="$(<ninja.version)" ninja_version="${ninja_version%\.git}"
+          printf '%s\n' "ninja_version=${ninja_version}" >> $GITHUB_ENV
+
+          printf '%s\n' "cmake_version=${cmake_version}" >> $GITHUB_OUTPUT
+          printf '%s\n' "ninja_version=${ninja_version}" >> $GITHUB_OUTPUT
+
+      - name: Host - Set deb dependencies for cmake and ninja
+        run: printf '%s\n' "cmake-deb-deps=openssl" >> $GITHUB_ENV
+
+      - name: Host - Create deb packages
+        uses: jiro4989/build-deb-action@v4
+        with:
+          package: "${{ matrix.name }}"
+          package_root: build
+          maintainer: userdocs
+          compress_type: gzip
+          version: "${{ env.cmake_version }}+${{ env.ninja_version }}"
+          depends: "${{ env.cmake-deb-deps }}"
+          arch: "${{ matrix.arch }}"
+          desc: "${{ matrix.name }}-${{ matrix.arch }} for ${{ matrix.os_id }}-${{ matrix.os_codename }}"
+
+      - name: Host - Remove version from release name and use hyphens
+        run: mv -f "${{ matrix.name }}_${{ env.cmake_version }}+${{ env.ninja_version }}_${{ matrix.arch }}.deb" "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+
+      - name: Host - upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}-deb"
+          path: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
+
+  release:
+    name: Upload artifacts to release
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    needs: [build]
+    if: needs.build.result == 'success'
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      cmake_version: ${{ needs.build.outputs.cmake_version }}
+      ninja_version: ${{ needs.build.outputs.ninja_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Host - Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          persist-credentials: false
+
+      - name: Host - artifacts organise for release
+        run: |
+          mkdir -p "releases"
+          for files in *-deb; do
+              cp -rf ${files}/* "releases/"
+          done
+
+      - name: Host - "Create release - tag - assets"
+        uses: ncipollo/release-action@v1
+        with:
+          prerelease: false
+          artifacts: releases/*.deb
+          replacesArtifacts: true
+          tag: "${{ env.cmake_version }}_${{ env.ninja_version }}"
+          name: "cmake ${{ env.cmake_version }} ninja ${{ env.ninja_version }}"
+          body: "cmake and ninja built from github latest release on amd64 arm64 armhf for: Debian Bullseye Bookworm - Ubuntu Focal Jammy Noble"
+          allowUpdates: true
+
+  ci-auto-rerun-failed-jobs:
+    if: failure() && (github.event.inputs.skip_rerun || 'false') == 'false'
+    needs: [release]
+    concurrency:
+      group: ci-auto-rerun-failed-jobs
+      cancel-in-progress: true
+    permissions:
+      actions: write
+    runs-on: ubuntu-24.04-arm
+    env:
+      GH_TOKEN: "${{ secrets.AUTO_RERUN || github.token }}"
+      github_repo: "" # To use ci-auto-rerun-failed-jobs.yml hosted in a remote repository else default to the current repository. Requires PAT token AUTO_RERUN
+      retries: ${{ github.event.inputs.retries || '1' }}
+      distinct_id: ${{ github.event.inputs.distinct_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: ci-auto-rerun-failed-jobs via ${{ env.github_repo || github.repository }}
+        run: >
+          gh workflow run ci-auto-rerun-failed-jobs-action.yml
+          --repo "${github_repo:-$GITHUB_REPOSITORY}"
+          -f github_repo=${GITHUB_REPOSITORY}
+          -f run_id=${GITHUB_RUN_ID}
+          -f attempts=${GITHUB_RUN_ATTEMPT}
+          -f retries=${retries}
+          -f distinct_id=${distinct_id}
