@@ -68,11 +68,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Host - update
-        run: sudo apt-get update
-
-      - name: Host - set up qemu-user-static binfmt-support
-        run: sudo apt install libpipeline1 qemu-user-static binfmt-support
+      - name: Host - Bootstrap qemu
+        uses: userdocs/actions/qemu@main
 
       - name: Host - Create docker multiarch ${{ matrix.arch }} container
         run: docker run --name multiarch -it -d  -v ${{ github.workspace }}:/home/github ghcr.io/userdocs/dcb:${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
