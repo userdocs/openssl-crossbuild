@@ -33,7 +33,7 @@ jobs:
       matrix:
         name: [openssl]
         os_id: [debian, ubuntu]
-        os_codename: [bullseye, bookworm, focal, jammy, noble]
+        os_codename: [bullseye, bookworm, trixie, jammy, noble]
         arch: [amd64, armhf, arm64]
         include:
           - arch: amd64
@@ -44,8 +44,6 @@ jobs:
             cross_openssl: "linux-aarch64"
         exclude:
           - os_id: debian
-            os_codename: focal
-          - os_id: debian
             os_codename: jammy
           - os_id: debian
             os_codename: noble
@@ -53,6 +51,8 @@ jobs:
             os_codename: bullseye
           - os_id: ubuntu
             os_codename: bookworm
+          - os_id: ubuntu
+            os_codename: trixie
 
     name: ${{ matrix.os_id }}:${{ matrix.os_codename }} ${{ matrix.name }} ${{ matrix.arch }}
 
@@ -61,6 +61,7 @@ jobs:
       github_branch: "master"
       cxx_standard: "17"
       GH_TOKEN: "${{ github.token }}"
+      container_name: "builder"
 
     steps:
       - name: Host - Checkout action
@@ -69,15 +70,23 @@ jobs:
           persist-credentials: false
 
       - name: Host - Bootstrap qemu
-        uses: userdocs/actions/qemu@main
+        uses: userdocs/actions/qemu@e74d179578ddcf1cd07cd9eefd0915f33a3bd600 # v1.0.1
 
-      - name: Host - Create docker multiarch ${{ matrix.arch }} container
-        run: docker run --name multiarch -it -d  -v ${{ github.workspace }}:/home/github ghcr.io/userdocs/dcb:${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
+      - uses: userdocs/actions/qbt_docker@main
+        with:
+            # if the env.custom file exists, it will be used to pass environment
+            distinct_id: ""
+            use_host_env: "false"
+            container_name: ${{ env.container_name }}
+            os_id: ghcr.io/userdocs/dcb
+            os_version_id: ${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
+            uid: gh
+            gid: gh
 
       - name: Docker - zlib-ng download and install
         run: |
-          docker exec multiarch curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
-          docker exec multiarch dpkg -i ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
+          docker exec ${container_name} curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
+          docker exec ${container_name} sudo dpkg -i ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
 
       - name: Host - Git clone ${{ matrix.name }} ${{ env.github_branch }}
         run: git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git ${{ matrix.name }}
@@ -90,21 +99,21 @@ jobs:
           printf '%s\n' "openssl_version=${openssl_version}" >> $GITHUB_OUTPUT
 
       - name: Docker - ${{ matrix.name }} configure
-        run: docker exec -u github:github -w /home/github/openssl multiarch ./Configure ${{ matrix.cross_openssl }} --prefix="/home/github/build/${{ env.opt_dir_name }}" --libdir=lib --openssldir=/etc/ssl zlib
+        run: docker exec -w /home/gh/openssl ${container_name} ./Configure ${{ matrix.cross_openssl }} --prefix="/home/github/build/${{ env.opt_dir_name }}" --libdir=lib --openssldir=/etc/ssl zlib
 
       - name: Docker - dump preferences for openssl
-        run: docker exec -u github:github -w /home/github/openssl multiarch perl configdata.pm --dump
+        run: docker exec -w /home/gh/openssl ${container_name} perl configdata.pm --dump
 
       - name: Docker - Make build openssl
-        run: docker exec -u github:github -w /home/github/openssl multiarch make -j $(nproc)
+        run: docker exec -w /home/gh/openssl ${container_name} make -j $(nproc)
 
       - name: Docker - Make install_sw openssl
-        run: docker exec -u github:github -w /home/github/openssl multiarch make install_sw
+        run: docker exec -w /home/gh/openssl ${container_name} make install_sw
 
       - name: Docker - ldconfig - create /etc/ld.so.conf.d/openssl.conf
         run: |
-          docker exec -u github:github -w /home/github/build multiarch mkdir -p etc/ld.so.conf.d
-          docker exec -u github:github -w /home/github/build/etc/ld.so.conf.d multiarch bash -c "printf '%s\n' '/${{ env.opt_dir_name }}/lib' > openssl.conf"
+          docker exec -w /home/gh/build ${container_name} mkdir -p etc/ld.so.conf.d
+          docker exec -w /home/gh/build/etc/ld.so.conf.d ${container_name} bash -c "printf '%s\n' '/${{ env.opt_dir_name }}/lib' > openssl.conf"
 
       - name: Host - Create deb packages
         uses: jiro4989/build-deb-action@v4
