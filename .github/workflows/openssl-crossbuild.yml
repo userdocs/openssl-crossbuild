@@ -65,7 +65,7 @@ jobs:
 
     steps:
       - name: Host - Checkout action
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -116,7 +116,7 @@ jobs:
           docker exec -w /home/gh/build/etc/ld.so.conf.d ${container_name} bash -c "printf '%s\n' '/${{ env.opt_dir_name }}/lib' > openssl.conf"
 
       - name: Host - Create deb packages
-        uses: jiro4989/build-deb-action@v4
+        uses: jiro4989/build-deb-action@a883c65147d80579cb359548b9a902ff0a35ae5b # v4.3.0
         with:
           package: "${{ matrix.name }}"
           package_root: build
@@ -131,7 +131,7 @@ jobs:
         run: mv -f "${{ matrix.name }}_${openssl_version}_${{ matrix.arch }}.deb" "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
 
       - name: Host - upload deb packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}-deb"
           path: "${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.name }}-${{ matrix.arch }}.deb"
@@ -148,12 +148,12 @@ jobs:
       openssl_version: ${{ needs.build.outputs.openssl_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Host - Download artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
 
       - name: Host - artifacts organise for release
         run: |
@@ -163,7 +163,7 @@ jobs:
           done
 
       - name: Host - "Create release - tag - assets"
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@bcfe5470707e8832e12347755757cec0eb3c22af # v1.18.0
         with:
           prerelease: false
           artifacts: releases/*.deb
@@ -188,7 +188,7 @@ jobs:
       retries: ${{ github.event.inputs.retries || '1' }}
       distinct_id: ${{ github.event.inputs.distinct_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
       - name: ci-auto-rerun-failed-jobs via ${{ env.github_repo || github.repository }}
