@@ -73,23 +73,18 @@ jobs:
         uses: userdocs/actions/qemu@e74d179578ddcf1cd07cd9eefd0915f33a3bd600 # v1.0.1
 
       - uses: userdocs/actions/qbt_docker@main
+        id: qbt_docker
         with:
-            # if the env.custom file exists, it will be used to pass environment
-            distinct_id: ""
-            use_host_env: "false"
-            container_name: ${{ env.container_name }}
-            os_id: ghcr.io/userdocs/dcb
+            os_id: ghcr.io/userdocs/dcb # this action works with ghcr.io/userdocs/* images and generic images like debian/ubuntu/alpine
             os_version_id: ${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
-            uid: gh
-            gid: gh
 
       - name: Docker - zlib-ng download and install
         run: |
-          docker exec ${container_name} curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
-          docker exec ${container_name} sudo dpkg -i ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
+          docker exec "${container_name}" curl -sNL "https://github.com/userdocs/zlib-ng-crossbuild/releases/latest/download/${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb" -o ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
+          docker exec "${container_name}" sudo dpkg -i ${{ matrix.os_id }}-${{ matrix.os_codename }}-zlib-ng-${{ matrix.arch }}.deb
 
       - name: Host - Git clone ${{ matrix.name }} ${{ env.github_branch }}
-        run: git clone --single-branch --branch "${{ env.github_branch }}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git ${{ matrix.name }}
+        run: git clone --single-branch --branch "${github_branch}" --shallow-submodules --recurse-submodules --depth 1 https://github.com/openssl/openssl.git ${{ matrix.name }}
 
       - name: Host - Set ${{ matrix.name }} version to variable
         id: version_info
@@ -99,21 +94,21 @@ jobs:
           printf '%s\n' "openssl_version=${openssl_version}" >> $GITHUB_OUTPUT
 
       - name: Docker - ${{ matrix.name }} configure
-        run: docker exec -w /home/gh/openssl ${container_name} ./Configure ${{ matrix.cross_openssl }} --prefix="/home/github/build/${{ env.opt_dir_name }}" --libdir=lib --openssldir=/etc/ssl zlib
+        run: docker exec -w "${wd}/openssl" "${container_name}" ./Configure ${{ matrix.cross_openssl }} --prefix="${wd}/build/${opt_dir_name}" --libdir=lib --openssldir=/etc/ssl zlib
 
       - name: Docker - dump preferences for openssl
-        run: docker exec -w /home/gh/openssl ${container_name} perl configdata.pm --dump
+        run: docker exec -w "${wd}/openssl" "${container_name}" perl configdata.pm --dump
 
       - name: Docker - Make build openssl
-        run: docker exec -w /home/gh/openssl ${container_name} make -j $(nproc)
+        run: docker exec -w "${wd}/openssl" "${container_name}" make -j $(nproc)
 
       - name: Docker - Make install_sw openssl
-        run: docker exec -w /home/gh/openssl ${container_name} make install_sw
+        run: docker exec -w "${wd}/openssl" "${container_name}" make install_sw
 
       - name: Docker - ldconfig - create /etc/ld.so.conf.d/openssl.conf
         run: |
-          docker exec -w /home/gh/build ${container_name} mkdir -p etc/ld.so.conf.d
-          docker exec -w /home/gh/build/etc/ld.so.conf.d ${container_name} bash -c "printf '%s\n' '/${{ env.opt_dir_name }}/lib' > openssl.conf"
+          docker exec -w "${wd}/build" "${container_name}" mkdir -p etc/ld.so.conf.d
+          docker exec -w "${wd}/build/etc/ld.so.conf.d" "${container_name}" bash -c "printf '%s\n' '/${opt_dir_name}/lib' > openssl.conf"
 
       - name: Host - Create deb packages
         uses: jiro4989/build-deb-action@a883c65147d80579cb359548b9a902ff0a35ae5b # v4.3.0
@@ -170,7 +165,7 @@ jobs:
           replacesArtifacts: true
           tag: "${{ env.openssl_version }}"
           name: "openssl ${{ env.openssl_version }}"
-          body: "openssl built from github latest release on amd64 arm64 armhf for Debian Bullseye Bookworm and Ubuntu Focal Jammy Noble"
+          body: "openssl built from github latest release on amd64 arm64 armhf for Debian Bullseye Bookworm Trixie and Ubuntu Jammy Noble"
           allowUpdates: true
 
   ci-auto-rerun-failed-jobs:
