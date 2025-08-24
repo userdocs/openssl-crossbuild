@@ -70,13 +70,14 @@ jobs:
           persist-credentials: false
 
       - name: Host - Bootstrap qemu
-        if: matrix.arch != 'amd64'
-        uses: userdocs/actions/qemu@e74d179578ddcf1cd07cd9eefd0915f33a3bd600 # v1.0.1
-
-      - uses: userdocs/actions/qbt_docker@main
-        id: qbt_docker
+        uses: userdocs/actions/qemu@749d0010d8abde6c8a8ffc720856de5e799bdfea # v1.0.2
         with:
-            os_id: ghcr.io/userdocs/dcb # this action works with ghcr.io/userdocs/* images and generic images like debian/ubuntu/alpine
+          target_arch: ${{ matrix.arch }}
+
+      - name: Host - Bootstrap docker container
+        uses: userdocs/actions/qbt_docker@749d0010d8abde6c8a8ffc720856de5e799bdfea # v1.0.2
+        with:
+            os_id: ghcr.io/userdocs/dcb
             os_version_id: ${{ matrix.os_id }}-${{ matrix.os_codename }}-${{ matrix.arch }}
 
       - name: Docker - zlib-ng download and install
